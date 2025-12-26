@@ -1,0 +1,32 @@
+
+services:
+  responder:
+    volumes:
+      - ./tmp:/host_tmp
+    build: .
+    container_name: bfd_responder
+    command: ["/app/bfd_responder", "multi"]
+    networks:
+      ge-001-docker:
+        ipv4_address: 10.0.1.40
+    ports:
+        - "1234:1234"
+
+  initiator:
+    volumes:
+      - ./tmp:/host_tmp
+    build: .
+    container_name: bfd_initiator
+    command: ["/app/bfd_initiator", "multi"]
+    networks:
+      ge-000-docker:
+        ipv4_address: 10.0.0.40
+    ports:
+        - "1235:1235"
+
+
+networks:
+  ge-000-docker:
+    external: true
+  ge-001-docker:
+    external: true

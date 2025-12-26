@@ -1,0 +1,8 @@
+CMakeCache.txt
+CMakeFiles/
+*.o
+*.a
+*.so
+*.swp
+*.tmp
+*.log
