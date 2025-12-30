@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <net/if.h>
 
 #define BFD_MAX_SESSIONS   256
 #define BFD_HASH_SIZE      257
@@ -40,6 +41,10 @@ typedef struct {
     uint64_t next_echo_ns;
     uint8_t admin_down_sent;
     uint8_t admin_down_by_command;
+
+    // Cached peer MAC and interface for echo packets
+    unsigned char peer_mac[6];
+    char iface[IFNAMSIZ];
 } bfd_session_t;
 
 // Global engine mode (set by engine)
@@ -87,5 +92,8 @@ void bfd_session_handle_rx(int sockfd,
 void bfd_session_check_timers(int ctrl_sock);
 
 void bfd_session_init();
+ 
+/* Send a raw Ethernet echo for single-hop sessions (returns 0 on success) */
+int bfd_send_echo(bfd_session_t *s);
 
 #endif

@@ -2,10 +2,13 @@
     "configurations": [
         {
             "name": "Linux",
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+            "compilerPath": "/usr/bin/gcc",
             "includePath": [
                 "${workspaceFolder}/**"
             ],
             "defines": [
+                "_DEFAULT_SOURCE",
                 "_POSIX_C_SOURCE=199309L"
             ],
             "cStandard": "c11",

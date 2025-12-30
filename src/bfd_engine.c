@@ -7,11 +7,16 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
+#include <netinet/udp.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
+#include <linux/if_packet.h>
+#include <net/ethernet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 
 #define MAX_EVENTS 64
 
@@ -58,27 +63,14 @@ static int create_ctrl_socket(int mode)
 
 static int create_echo_socket(void)
 {
-    int sock = socket(AF_INET6, SOCK_DGRAM, 0);
+    /* Create a packet socket to send/receive full Ethernet frames */
+    int sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     if (sock < 0) {
-        perror("echo socket");
+        perror("echo packet socket");
         return -1;
     }
 
-    int v6only = 0;
-    setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
-
-    struct sockaddr_in6 addr6;
-    memset(&addr6, 0, sizeof(addr6));
-    addr6.sin6_family = AF_INET6;
-    addr6.sin6_addr = in6addr_any;
-    addr6.sin6_port = htons(BFD_ECHO_PORT);
-
-    if (bind(sock, (struct sockaddr *)&addr6, sizeof(addr6)) < 0) {
-        perror("echo bind");
-        close(sock);
-        return -1;
-    }
-
+    /* Enable receiving on the socket for all interfaces */
     return sock;
 }
 
@@ -250,16 +242,71 @@ int bfd_engine_run(int mode)
             /* ---------------- ECHO PACKET ---------------- */
             else if (mode == BFD_MODE_SINGLEHOP && echo_sock >= 0 && fd == echo_sock) {
 
-                char buf[64];
-                struct sockaddr_storage src;
-                socklen_t slen = sizeof(src);
+                unsigned char buf[2048];
+                struct sockaddr_ll from_ll;
+                socklen_t slen = sizeof(from_ll);
 
                 ssize_t r = recvfrom(echo_sock, buf, sizeof(buf), 0,
-                                     (struct sockaddr *)&src, &slen);
+                                     (struct sockaddr *)&from_ll, &slen);
                 if (r <= 0)
                     continue;
 
-                bfd_session_t *s = bfd_session_find_by_peer(&src, slen);
+                /* Parse Ethernet frame */
+                if ((size_t)r < sizeof(struct ether_header))
+                    continue;
+
+                struct ether_header *eh = (struct ether_header *)buf;
+                uint16_t ethertype = ntohs(eh->ether_type);
+
+                struct sockaddr_storage src_ss;
+                socklen_t src_len = 0;
+                memset(&src_ss, 0, sizeof(src_ss));
+
+                if (ethertype == ETH_P_IP) {
+                    if ((size_t)r < sizeof(struct ether_header) + sizeof(struct iphdr))
+                        continue;
+                    struct iphdr *iph = (struct iphdr *)(buf + sizeof(struct ether_header));
+                    src_ss.ss_family = AF_INET;
+                    struct sockaddr_in *sin = (struct sockaddr_in *)&src_ss;
+                    sin->sin_family = AF_INET;
+                    sin->sin_addr.s_addr = iph->saddr;
+                    sin->sin_port = htons(BFD_ECHO_PORT);
+                    src_len = sizeof(struct sockaddr_in);
+                    /* Check UDP and port */
+                    if (iph->protocol != IPPROTO_UDP)
+                        continue;
+                    size_t iphdr_len = iph->ihl * 4;
+                    if ((size_t)r < sizeof(struct ether_header) + iphdr_len + sizeof(struct udphdr))
+                        continue;
+                    struct udphdr *udph = (struct udphdr *)(buf + sizeof(struct ether_header) + iphdr_len);
+                    if (ntohs(udph->dest) != BFD_ECHO_PORT)
+                        continue;
+
+                } else if (ethertype == ETH_P_IPV6) {
+                    if ((size_t)r < sizeof(struct ether_header) + sizeof(struct ip6_hdr))
+                        continue;
+                    struct ip6_hdr *ip6h = (struct ip6_hdr *)(buf + sizeof(struct ether_header));
+                    src_ss.ss_family = AF_INET6;
+                    struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&src_ss;
+                    sin6->sin6_family = AF_INET6;
+                    memcpy(&sin6->sin6_addr, &ip6h->ip6_src, sizeof(struct in6_addr));
+                    sin6->sin6_port = htons(BFD_ECHO_PORT);
+                    src_len = sizeof(struct sockaddr_in6);
+                    /* Only handle UDP */
+                    if (ip6h->ip6_nxt != IPPROTO_UDP)
+                        continue;
+                    /* Very basic check for UDP dest port */
+                    size_t ip6hdr_len = sizeof(struct ip6_hdr);
+                    if ((size_t)r < sizeof(struct ether_header) + ip6hdr_len + sizeof(struct udphdr))
+                        continue;
+                    struct udphdr *udph = (struct udphdr *)(buf + sizeof(struct ether_header) + ip6hdr_len);
+                    if (ntohs(udph->dest) != BFD_ECHO_PORT)
+                        continue;
+                } else {
+                    continue;
+                }
+
+                bfd_session_t *s = bfd_session_find_by_peer(&src_ss, src_len);
                 if (s && s->echo_enabled) {
                     s->detect_time_ns = bfd_now_ns() +
                         (uint64_t)s->min_rx * s->detect_mult * 1000ULL;
