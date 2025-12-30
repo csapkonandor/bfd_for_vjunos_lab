@@ -258,20 +258,10 @@ int bfd_engine_run(int mode)
                 struct ether_header *eh = (struct ether_header *)buf;
                 uint16_t ethertype = ntohs(eh->ether_type);
 
-                struct sockaddr_storage src_ss;
-                socklen_t src_len = 0;
-                memset(&src_ss, 0, sizeof(src_ss));
-
                 if (ethertype == ETH_P_IP) {
                     if ((size_t)r < sizeof(struct ether_header) + sizeof(struct iphdr))
                         continue;
                     struct iphdr *iph = (struct iphdr *)(buf + sizeof(struct ether_header));
-                    src_ss.ss_family = AF_INET;
-                    struct sockaddr_in *sin = (struct sockaddr_in *)&src_ss;
-                    sin->sin_family = AF_INET;
-                    sin->sin_addr.s_addr = iph->saddr;
-                    sin->sin_port = htons(BFD_ECHO_PORT);
-                    src_len = sizeof(struct sockaddr_in);
                     /* Check UDP and port */
                     if (iph->protocol != IPPROTO_UDP)
                         continue;
@@ -286,12 +276,6 @@ int bfd_engine_run(int mode)
                     if ((size_t)r < sizeof(struct ether_header) + sizeof(struct ip6_hdr))
                         continue;
                     struct ip6_hdr *ip6h = (struct ip6_hdr *)(buf + sizeof(struct ether_header));
-                    src_ss.ss_family = AF_INET6;
-                    struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&src_ss;
-                    sin6->sin6_family = AF_INET6;
-                    memcpy(&sin6->sin6_addr, &ip6h->ip6_src, sizeof(struct in6_addr));
-                    sin6->sin6_port = htons(BFD_ECHO_PORT);
-                    src_len = sizeof(struct sockaddr_in6);
                     /* Only handle UDP */
                     if (ip6h->ip6_nxt != IPPROTO_UDP)
                         continue;
@@ -306,10 +290,47 @@ int bfd_engine_run(int mode)
                     continue;
                 }
 
-                bfd_session_t *s = bfd_session_find_by_peer(&src_ss, src_len);
+                unsigned char *src_mac = eh->ether_shost;
+                bfd_session_t *s = bfd_session_find_by_peer_mac(src_mac);
                 if (s && s->echo_enabled) {
                     s->detect_time_ns = bfd_now_ns() +
                         (uint64_t)s->min_rx * s->detect_mult * 1000ULL;
+                }
+
+                if (!s) {
+                    // Send the packet back to the sender MAC
+                    struct ifaddrs *ifap, *ifa;
+                    if (getifaddrs(&ifap) == 0) {
+                        unsigned char local_mac[6] = {0};
+                        int found = 0;
+                        for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+                            if (ifa->ifa_addr && ifa->ifa_addr->sa_family == AF_PACKET) {
+                                struct sockaddr_ll *sll = (struct sockaddr_ll *)ifa->ifa_addr;
+                                if (sll->sll_ifindex == from_ll.sll_ifindex) {
+                                    memcpy(local_mac, sll->sll_addr, 6);
+                                    found = 1;
+                                    break;
+                                }
+                            }
+                        }
+                        freeifaddrs(ifap);
+                        if (found) {
+                            // Swap MACs: dst = original src, src = local
+                            unsigned char temp[6];
+                            memcpy(temp, eh->ether_shost, 6);
+                            memcpy(eh->ether_shost, local_mac, 6);
+                            memcpy(eh->ether_dhost, temp, 6);
+
+                            struct sockaddr_ll dst;
+                            memset(&dst, 0, sizeof(dst));
+                            dst.sll_family = AF_PACKET;
+                            dst.sll_ifindex = from_ll.sll_ifindex;
+                            dst.sll_halen = ETH_ALEN;
+                            memcpy(dst.sll_addr, eh->ether_dhost, 6);
+
+                            sendto(echo_sock, buf, r, 0, (struct sockaddr *)&dst, sizeof(dst));
+                        }
+                    }
                 }
 
             }

@@ -280,7 +280,7 @@ int bfd_send_echo(bfd_session_t *s)
         struct in_addr src_addr;
         inet_pton(AF_INET, local_ip_str, &src_addr);
         iph->ip_src = src_addr;
-        iph->ip_dst = sin->sin_addr;
+        iph->ip_dst = src_addr;//sin->sin_addr;
         iph->ip_sum = 0;
         iph->ip_sum = ip_checksum(iph, sizeof(struct ip));
 
@@ -471,6 +471,16 @@ bfd_session_t *bfd_session_find_by_peer(const struct sockaddr_storage *peer,
         if (sessions[i].used &&
             addr_equal(&sessions[i].peer_addr, sessions[i].peer_len,
                        peer, peer_len)) {
+            return &sessions[i];
+        }
+    }
+    return NULL;
+}
+
+bfd_session_t *bfd_session_find_by_peer_mac(const unsigned char *mac)
+{
+    for (int i = 0; i < BFD_MAX_SESSIONS; i++) {
+        if (sessions[i].used && memcmp(sessions[i].peer_mac, mac, 6) == 0) {
             return &sessions[i];
         }
     }

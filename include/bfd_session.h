@@ -72,6 +72,7 @@ bfd_session_t *bfd_session_find_by_my_disc(uint32_t my_disc);
 bfd_session_t *bfd_session_find_by_your_disc(uint32_t your_disc);
 bfd_session_t *bfd_session_find_by_peer(const struct sockaddr_storage *peer,
                                         socklen_t peer_len);
+bfd_session_t *bfd_session_find_by_peer_mac(const unsigned char *mac);
 
 void bfd_session_delete(uint32_t disc);
 void bfd_session_down(uint32_t disc);
