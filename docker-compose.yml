@@ -5,7 +5,13 @@ services:
       - ./tmp:/host_tmp
     build: .
     container_name: bfd_responder
-    command: ["/app/bfd_responder", "multi"]
+    command: |
+      sh -c "
+      ip route del default 2>/dev/null || true;
+      ip route add default via 10.0.1.1;
+      /app/bfd_responder multi
+      "
+    privileged: true
     networks:
       ge-001-docker:
         ipv4_address: 10.0.1.40
@@ -17,7 +23,13 @@ services:
       - ./tmp:/host_tmp
     build: .
     container_name: bfd_initiator
-    command: ["/app/bfd_initiator", "multi"]
+    command: |
+      sh -c "
+      ip route del default 2>/dev/null || true;
+      ip route add default via 10.0.0.1;
+      /app/bfd_initiator multi
+      "
+    privileged: true
     networks:
       ge-000-docker:
         ipv4_address: 10.0.0.40
