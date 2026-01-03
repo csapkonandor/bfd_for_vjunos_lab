@@ -18,6 +18,11 @@
 #include <ifaddrs.h>
 #include <net/if.h>
 
+#define USE_TIMERFD 1
+#ifdef USE_TIMERFD
+#include <sys/timerfd.h>
+#endif
+
 #define MAX_EVENTS 64
 
 int is_initiator = 0;
@@ -107,6 +112,23 @@ int bfd_engine_run(int mode)
         return 1;
     }
 
+#ifdef USE_TIMERFD
+    int timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+    if (timerfd < 0) {
+        perror("timerfd_create");
+        close(epfd);
+        close(ctrl_sock);
+        if (echo_sock >= 0) close(echo_sock);
+        return 1;
+    }
+
+    struct epoll_event timer_ev;
+    memset(&timer_ev, 0, sizeof(timer_ev));
+    timer_ev.events = EPOLLIN;
+    timer_ev.data.fd = timerfd;
+    epoll_ctl(epfd, EPOLL_CTL_ADD, timerfd, &timer_ev);
+#endif
+
     struct epoll_event ev;
     memset(&ev, 0, sizeof(ev));
     ev.events = EPOLLIN;
@@ -132,9 +154,24 @@ int bfd_engine_run(int mode)
         struct epoll_event events[MAX_EVENTS];
         //int n = epoll_wait(epfd, events, MAX_EVENTS, 50);
         
+#ifdef USE_TIMERFD
+        // Set timer for next event
+        uint64_t next_ns = bfd_session_get_next_timer_ns();
+        if (next_ns != UINT64_MAX) {
+            struct itimerspec its;
+            memset(&its, 0, sizeof(its));
+            its.it_value.tv_sec = next_ns / 1000000000ULL;
+            its.it_value.tv_nsec = next_ns % 1000000000ULL;
+            timerfd_settime(timerfd, TFD_TIMER_ABSTIME, &its, NULL);
+        }
+        int timeout = -1; // Block until event
+#else
+        int timeout = 50;
+#endif
+        
         int n;
         do {
-            n = epoll_wait(epfd, events, MAX_EVENTS, 50);
+            n = epoll_wait(epfd, events, MAX_EVENTS, timeout);
         } while (n < 0 && errno == EINTR);
 
         if (n < 0) {
@@ -147,6 +184,15 @@ int bfd_engine_run(int mode)
 
             if (!(events[i].events & EPOLLIN))
                 continue;
+
+#ifdef USE_TIMERFD
+            if (fd == timerfd) {
+                uint64_t expirations;
+                read(timerfd, &expirations, sizeof(expirations));
+                bfd_session_check_timers(ctrl_sock);
+                continue;
+            }
+#endif
 
             /* ---------------- CONTROL PACKET ---------------- */
             if (fd == ctrl_sock) {
@@ -358,12 +404,17 @@ int bfd_engine_run(int mode)
             }
         }
 
+#ifndef USE_TIMERFD
         bfd_session_check_timers(ctrl_sock);
+#endif
     }
 
     close(epfd);
     close(ctrl_sock);
     if (echo_sock >= 0) close(echo_sock);
+#ifdef USE_TIMERFD
+    close(timerfd);
+#endif
     return 0;
 }
 

@@ -92,6 +92,9 @@ void bfd_session_handle_rx(int sockfd,
 // Timer scan
 void bfd_session_check_timers(int ctrl_sock);
 
+// Get next timer expiration time in ns
+uint64_t bfd_session_get_next_timer_ns(void);
+
 void bfd_session_init();
  
 /* Send a raw Ethernet echo for single-hop sessions (returns 0 on success) */

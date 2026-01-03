@@ -778,3 +778,23 @@ void bfd_session_check_timers(int ctrl_sock)
         }
     }
 }
+
+uint64_t bfd_session_get_next_timer_ns(void)
+{
+    uint64_t min_time = UINT64_MAX;
+    for (int i = 0; i < BFD_MAX_SESSIONS; i++) {
+        if (!sessions[i].used)
+            continue;
+        bfd_session_t *s = &sessions[i];
+        if (s->next_tx_ns < min_time)
+            min_time = s->next_tx_ns;
+        if (bfd_engine_mode == BFD_MODE_SINGLEHOP &&
+            s->echo_enabled &&
+            s->min_echo &&
+            s->next_echo_ns < min_time)
+            min_time = s->next_echo_ns;
+        if (s->detect_time_ns < min_time)
+            min_time = s->detect_time_ns;
+    }
+    return min_time;
+}
