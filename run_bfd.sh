@@ -67,13 +67,13 @@ case "$COMMAND" in
   gdb-init)
     echo "🐞 Attaching initiator under gdbserver (port 1235)..."
     docker exec -it bfd_initiator \
-      gdbserver 0.0.0.0:1235  --attach 9
+      sh -c "gdbserver 0.0.0.0:1235 --attach \$(ps aux | awk '{print \$11 \" \" \$2}' | grep app | awk '{print \$2}')" 
     ;;
 
   gdb-resp)
     echo "🐞 Attaching responder under gdbserver (port 1234)..."
     docker exec -it bfd_responder \
-      gdbserver 0.0.0.0:1234  --attach 9
+      sh -c "gdbserver 0.0.0.0:1234 --attach \$(ps aux | awk '{print \$11 \" \" \$2}' | grep app | awk '{print \$2}')" 
     ;;
 
   *)
