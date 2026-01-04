@@ -2,7 +2,25 @@ BUILD
 ======================
 mkdir build
 cd build
-cmake ..
+cmake -DCMAKE_BUILD_TYPE=Debug ..
 make
+
+cd ..
+
+RUN - Basic commands to run BFD using Docker: 
+======================
+./run_bfd.sh build
+======================
+./run_bfd.sh up
+======================
+./run_bfd.sh down
+======================
+
+For more options, like adding sessions and debugging, see:
+./run_bfd.sh help
+
+
+
+
 
    
