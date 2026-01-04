@@ -21,6 +21,7 @@ int bfd_engine_mode = BFD_MODE_MULTIHOP;
 int bfd_echo_sock_fd = -1;
 
 static int hash_table[BFD_HASH_SIZE];
+#define HASH_TOMBSTONE -2
 
 static uint32_t bfd_hash_disc(uint32_t disc)
 {
@@ -412,7 +413,7 @@ static void bfd_hash_insert(uint32_t disc, int idx)
     uint32_t h = bfd_hash_disc(disc);
     for (int i = 0; i < BFD_HASH_SIZE; i++) {
         uint32_t pos = (h + i) % BFD_HASH_SIZE;
-        if (hash_table[pos] == -1) {
+        if (hash_table[pos] == -1 || hash_table[pos] == HASH_TOMBSTONE) {
             hash_table[pos] = idx;
             return;
         }
@@ -427,6 +428,8 @@ bfd_session_t *bfd_session_find_by_my_disc(uint32_t disc)
         int idx = hash_table[pos];
         if (idx == -1)
             return NULL;
+        if (idx == HASH_TOMBSTONE)
+            continue;
         if (sessions[idx].used && sessions[idx].my_disc == disc)
             return &sessions[idx];
     }
@@ -571,8 +574,19 @@ void bfd_session_delete(uint32_t disc)
     if (!s)
         return;
     //printf("Deleting session %u\n", disc);
+    int idx = s - sessions;
     memset(s, 0, sizeof(*s));
-    // hash table not cleaned for simplicity in this demo
+    // Mark hash table entry as tombstone
+    uint32_t h = bfd_hash_disc(disc);
+    for (int i = 0; i < BFD_HASH_SIZE; i++) {
+        uint32_t pos = (h + i) % BFD_HASH_SIZE;
+        if (hash_table[pos] == idx) {
+            hash_table[pos] = HASH_TOMBSTONE;
+            break;
+        }
+        if (hash_table[pos] == -1)
+            break; // shouldn't happen
+    }
 }
 
 void bfd_session_down(uint32_t disc)
